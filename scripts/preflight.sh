@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 
 RESOURCES_BASE_DIR=".${CLASH_RESOURCES_DIR#"$CLASH_BASE_DIR"}"
-RESOURCES_CONFIG_BASE=".${CLASH_CONFIG_BASE#"$CLASH_BASE_DIR"}"
-RESOURCES_CONFIG_MIXIN=".${CLASH_CONFIG_MIXIN#"$CLASH_BASE_DIR"}"
 
 ZIP_BASE_DIR=".${CLASH_RESOURCES_DIR#"$CLASH_BASE_DIR"}/zip"
 
@@ -88,31 +86,36 @@ _load_zip() {
 }
 _download_zip() {
     (($#)) || return 0
-    local arch=$(uname -m)
     local url_clash url_mihomo url_yq url_subconverter
-
+    local arch=$(uname -m)
     case "$arch" in
     x86_64)
-        url_clash=https://downloads.clash.wiki/ClashPremium/clash-linux-amd64-2023.08.17.gz
-        url_mihomo=https://github.com/MetaCubeX/mihomo/releases/download/${VERSION_MIHOMO}/mihomo-linux-amd64-${VERSION_MIHOMO}.gz
+        local flags=$(grep -m1 '^flags' /proc/cpuinfo)
+        local level=v1
+        grep -qw sse4_2 <<<"$flags" && grep -qw popcnt <<<"$flags" && level=v2
+        grep -qw avx2 <<<"$flags" && grep -qw fma <<<"$flags" && level=v3
+        VERSION_MIHOMO=${level}-$VERSION_MIHOMO
+
+        url_clash=https://github.com/nelvko/clash-for-linux-install/releases/download/clash/clash-linux-amd64-2023.08.17.gz
+        url_mihomo=https://github.com/MetaCubeX/mihomo/releases/download/${VERSION_MIHOMO##*-}/mihomo-linux-amd64-${VERSION_MIHOMO}.gz
         url_yq=https://github.com/mikefarah/yq/releases/download/${VERSION_YQ}/yq_linux_amd64.tar.gz
         url_subconverter=https://github.com/tindy2013/subconverter/releases/download/${VERSION_SUBCONVERTER}/subconverter_linux64.tar.gz
         ;;
     *86*)
-        url_clash=https://downloads.clash.wiki/ClashPremium/clash-linux-386-2023.08.17.gz
-        url_mihomo=https://github.com/MetaCubeX/mihomo/releases/download/${VERSION_MIHOMO}/mihomo-linux-386-${VERSION_MIHOMO}.gz
+        url_clash=https://github.com/nelvko/clash-for-linux-install/releases/download/clash/clash-linux-386-2023.08.17.gz
+        url_mihomo=https://github.com/MetaCubeX/mihomo/releases/download/${VERSION_MIHOMO##*-}/mihomo-linux-386-${VERSION_MIHOMO}.gz
         url_yq=https://github.com/mikefarah/yq/releases/download/${VERSION_YQ}/yq_linux_386.tar.gz
         url_subconverter=https://github.com/tindy2013/subconverter/releases/download/${VERSION_SUBCONVERTER}/subconverter_linux32.tar.gz
         ;;
     armv*)
-        url_clash=https://downloads.clash.wiki/ClashPremium/clash-linux-armv5-2023.08.17.gz
-        url_mihomo=https://github.com/MetaCubeX/mihomo/releases/download/${VERSION_MIHOMO}/mihomo-linux-armv7-${VERSION_MIHOMO}.gz
+        url_clash=https://github.com/nelvko/clash-for-linux-install/releases/download/clash/clash-linux-armv5-2023.08.17.gz
+        url_mihomo=https://github.com/MetaCubeX/mihomo/releases/download/${VERSION_MIHOMO##*-}/mihomo-linux-armv7-${VERSION_MIHOMO}.gz
         url_yq=https://github.com/mikefarah/yq/releases/download/${VERSION_YQ}/yq_linux_arm.tar.gz
         url_subconverter=https://github.com/tindy2013/subconverter/releases/download/${VERSION_SUBCONVERTER}/subconverter_armv7.tar.gz
         ;;
     aarch64)
-        url_clash=https://downloads.clash.wiki/ClashPremium/clash-linux-arm64-2023.08.17.gz
-        url_mihomo=https://github.com/MetaCubeX/mihomo/releases/download/${VERSION_MIHOMO}/mihomo-linux-arm64-${VERSION_MIHOMO}.gz
+        url_clash=https://github.com/nelvko/clash-for-linux-install/releases/download/clash/clash-linux-arm64-2023.08.17.gz
+        url_mihomo=https://github.com/MetaCubeX/mihomo/releases/download/${VERSION_MIHOMO##*-}/mihomo-linux-arm64-${VERSION_MIHOMO}.gz
         url_yq=https://github.com/mikefarah/yq/releases/download/${VERSION_YQ}/yq_linux_arm64.tar.gz
         url_subconverter=https://github.com/tindy2013/subconverter/releases/download/${VERSION_SUBCONVERTER}/subconverter_aarch64.tar.gz
         ;;
@@ -129,11 +132,11 @@ _download_zip() {
     )
 
     local item target_zips=()
-    _okcat '🖥️ ' "系统架构：$arch"
+    _okcat '🖥️ ' "系统架构：$arch $level"
     for item in "$@"; do
         local url="${urls[$item]}"
         local proxy_url="${URL_GH_PROXY:+${URL_GH_PROXY%/}/}${url}"
-        [ "$item" != 'clash' ] && url="$proxy_url"
+        url="$proxy_url"
         _okcat '⏳' "正在下载：${item}：$url"
         local target="${ZIP_BASE_DIR}/$(basename "$url")"
         curl \
@@ -223,6 +226,7 @@ _openrc() {
     service_stop=(rc-service "$KERNEL_NAME" stop)
     service_restart=(rc-service "$KERNEL_NAME" restart)
     service_status=(rc-service "$KERNEL_NAME" status)
+    service_is_active=(rc-service "$KERNEL_NAME" status)
 }
 _runit() {
     service_src="${SCRIPT_INIT_DIR}/runit.sh"
@@ -262,6 +266,7 @@ _sysvinit() {
     service_stop=(service "$KERNEL_NAME" stop)
     service_restart=(service "$KERNEL_NAME" restart)
     service_status=(service "$KERNEL_NAME" status)
+    service_is_active=(service "$KERNEL_NAME" status)
 }
 # shellcheck disable=SC2206
 _systemd() {
@@ -277,13 +282,16 @@ _systemd() {
     service_stop=($_SUDO systemctl stop "$KERNEL_NAME")
     service_restart=($_SUDO systemctl restart "$KERNEL_NAME")
     service_status=($_SUDO systemctl status "$KERNEL_NAME")
+    service_is_active=($_SUDO systemctl is-active "$KERNEL_NAME")
 }
 _nohup() {
     service_enable=(false)
     service_disable=(false)
 
     service_start=('(' nohup "$BIN_KERNEL" -d "$CLASH_RESOURCES_DIR" -f "$CLASH_CONFIG_RUNTIME" '>\&' "$FILE_LOG" '\&' ')')
+    service_sudo_start=(sudo nohup "$BIN_KERNEL" -d "$CLASH_RESOURCES_DIR" -f "$CLASH_CONFIG_RUNTIME" '>\&' "$FILE_LOG" '\&')
     service_status=(pgrep -fa "$BIN_KERNEL")
+    service_is_active=(pgrep -fa "$BIN_KERNEL")
     service_stop=(pkill -9 -f "$BIN_KERNEL")
 }
 
@@ -307,9 +315,10 @@ _install_service() {
             -e "s#placeholder_kernel_desc#$kernel_desc#g" \
             "$service_target"
     }
-
+    [ "$INIT_TYPE" != "nohup" ] && service_sudo_start=("${service_start[@]}")
     sed -i \
         -e "s#placeholder_start#${service_start[*]}#g" \
+        -e "s#placeholder_sudo_start#${service_sudo_start[*]}#g" \
         -e "s#placeholder_status#${service_status[*]}#g" \
         -e "s#placeholder_is_active#${service_is_active[*]}#g" \
         -e "s#placeholder_stop#${service_stop[*]}#g" \
@@ -350,11 +359,12 @@ _apply_rc() {
     local source_clashctl=". $CLASH_CMD_DIR/clashctl.sh"
     # shellcheck disable=SC2086
     tee -a "$SHELL_RC_BASH" $SHELL_RC_ZSH >/dev/null <<EOF
+
 $start_flag
 # 加载 clashctl 命令
 $source_clashctl
-# 自动开启代理环境
-watch_proxy
+# 新开 shell 时自动开启代理环境
+# watch_proxy
 $end_flag
 EOF
     [ -n "$SHELL_RC_FISH" ] && /usr/bin/install "$SCRIPT_CMD_FISH" "$SHELL_RC_FISH"
@@ -362,16 +372,15 @@ EOF
 }
 _revoke_rc() {
     _detect_rc
-    sed -i.bak "/$start_flag/,/$end_flag/d" "$SHELL_RC_BASH" "$SHELL_RC_ZSH" 2>/dev/null
+    sed -i --follow-symlinks "/$start_flag/,/$end_flag/d" "$SHELL_RC_BASH" "$SHELL_RC_ZSH" 2>/dev/null
     [ -n "$SHELL_RC_FISH" ] && rm -f "$SHELL_RC_FISH" 2>/dev/null
 }
 
 _set_envs() {
-    _set_env CLASH_CONFIG_URL "$CLASH_CONFIG_URL"
     _set_env INIT_TYPE "$INIT_TYPE"
     _set_env KERNEL_NAME "$KERNEL_NAME"
     _set_env CLASH_BASE_DIR "$CLASH_BASE_DIR"
-
+    _set_env VERSION_MIHOMO "$VERSION_MIHOMO"
 }
 
 _get_random_val() {
@@ -387,5 +396,5 @@ _is_root() {
 
 _quit() {
     _is_regular_sudo && exec su "$SUDO_USER"
-    exec "$SHELL" -i
+    exec "$SHELL" -i -c "$*"
 }
